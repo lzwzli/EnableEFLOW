@@ -27,6 +27,33 @@ function PrintStatus {
     write-host ('~~') -NoNewline -ForegroundColor Yellow
     Write-Host " "
 }
+#===============================================================
+# Introduction and information collecting
+#===============================================================
+write-host ('='*200)
+Write-Host "This script installs the EFLOW VM and sets up the necessary pre-requisites like Hyper-V and Hyper-V switch."
+write-host " "
+Write-Host "The script first checks if Hyper-V is enabled. If not, Hyper-V is enabled."
+Write-Host "Then, it checks if a Hyper-V switch called EFLOWSwitch exists. If not, it would create the switch, prompting the user for the desired adapter."
+Write-Host "Then, it would setup the firewall in the EFLOW VM for ICONICS IoTWorX."
+Write-Host "Lastly, it would provision the EFLOW VM as an IoT device of an IoT hub."
+write-host ('='*200)
+
+Write-Host "How many CPU's should the EFLOW VM have ?" -ForegroundColor Yellow
+$CPUCount = Read-Host "CPU count"
+
+Write-Host "How much memory (in MB) should the EFLOW VM have ?" -ForegroundColor Yellow
+$MemoryInMB = Read-Host "Memory size (MB)"
+
+while ($toProvision -ne "Y" -and $toProvision -ne "N"){
+    Write-Host "Should the VM be provisioned as an IoT device ?" -ForegroundColor Yellow
+    write-host "To provision the EFLOW VM as an IoT device, an IoT device connection string from IoT Hub is required." -ForegroundColor Yellow
+    $toProvision = Read-Host "[Y]es  [N]o"
+}
+
+if($toProvision -eq "Y") {
+    $devConnString = Read-Host "IoT Device Connection String"
+}
 
 #===============================================================
 # Check Hyper-V
@@ -35,7 +62,7 @@ PrintHeader "Check Hyper-V State"
 PrintStatus "Checking if Hyper-V is enabled..."
 $hyperv = Get-WindowsOptionalFeature -FeatureName Microsoft-Hyper-V-All -Online
 if($hyperv.State -eq "Enabled"){
-    Write-Host "Hyper-V is enabled." -ForegroundColor Green -NoNewline
+    Write-Host "Hyper-V is enabled." -ForegroundColor Yellow -NoNewline
     Write-Host " "
 } else {
     Write-Host "Hyper-V is disabled." -ForegroundColor Red -NoNewline
@@ -88,16 +115,13 @@ try{
     write-host " "
     exit
 }
-
+PrintStatus "EFLOW msi downloaded."
+PrintStatus "Installing EFLOW..."
 Start-Process -Wait msiexec -ArgumentList "/i","$([io.Path]::Combine($env:TEMP, 'AzureIoTEdge.msi'))","/qn"
 Get-ExecutionPolicy -List
 Set-ExecutionPolicy -ExecutionPolicy AllSigned -Force
-Deploy-Eflow -cpuCount 2 -memoryInMB 2048 -vswitchName 'EFLOWSwitch' -vswitchType 'External'
-
-PrintStatus "Provision EFLOW VM..."
-Write-Host "Please obtain the IoT Device connection string from your IoT Hub"
-$devConnString = Read-Host "IoT Device Connection String:"
-Provision-EflowVm -provisioningType ManualConnectionString -devConnString $devConnString
+PrintStatus "Deploy EFLOW..."
+Deploy-Eflow -cpuCount $CPUCount -memoryInMB $MemoryInMB -vswitchName 'EFLOWSwitch' -vswitchType 'External'
 
 PrintStatus "Updating EFLOW VM firewall settings..."
 write-host "Open TCP port 8443."
@@ -113,4 +137,11 @@ Invoke-EflowVmCommand "sudo iptables -A INPUT -p udp --dport 47808 -j ACCEPT"
 write-host "Save IPv4 settings"
 Invoke-EflowVmCommand "sudo iptables-save | sudo tee /etc/systemd/scripts/ip4save"
 
-PrintStatus "EFLOW Installation Complete."
+if($toProvision -eq "Y"){
+    PrintStatus "Provisioning EFLOW VM..."
+    Provision-EflowVm -provisioningType ManualConnectionString -devConnString $devConnString
+    PrintStatus "EFLOW VM installation complete and provisioned as IoT device."
+} else {
+    PrintStatus "EFLOW VM installation complete but not provisioned."
+}
+
